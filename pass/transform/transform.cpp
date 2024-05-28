@@ -12,7 +12,9 @@ namespace
     PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM)
     {
       LLVMContext &Context = M.getContext();
-      Type *Mask = StructType::create(Context, "Mask");
+      StructType *MaskType = StructType::create(Context, "Mask");
+      MaskType->setBody(Type::getInt32Ty(Context));
+      Type *Mask = MaskType;
 
       for (Function &F : M)
       {
@@ -24,15 +26,22 @@ namespace
             // alloca를 기반으로 다른 instruction의 type을 추측할 수 있지 않을까?
             if (auto *Alloca = dyn_cast<AllocaInst>(&I))
             {
-              Alloca->setAllocatedType(Mask);
+              Alloca->setAllocatedType(MaskType);
             }
             else if (auto *Load = dyn_cast<LoadInst>(&I))
             {
-              Load->setOperand(0, UndefValue::get(Mask));
+              Load->mutateType(Mask);
             }
             else if (auto *Store = dyn_cast<StoreInst>(&I))
             {
-              Store->setOperand(0, UndefValue::get(Mask));
+              IRBuilder<> Builder(&I);
+              Value *StoredValue = Store->getOperand(0);
+              StoredValue->mutateType(Mask);
+              Store->setOperand(0, StoredValue);
+            }
+            else if (auto *Sext = dyn_cast<SExtInst>(&I))
+            {
+              Sext->mutateType(Mask);
             }
             errs() << I << "\n";
           }
