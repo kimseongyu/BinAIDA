@@ -3,27 +3,53 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/IR/IRBuilder.h"
 
+#include <cstring>
+#include <iostream>
+#include <fstream>
+
 using namespace llvm;
+using namespace std;
 
 namespace
 {
   struct GetInfo : public PassInfoMixin<GetInfo>
   {
+    GetInfo(std::string typeName, std::string fileName): 
+      typeName(typeName), fileName(fileName) {}
+
     PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM)
     {
+
+      ofstream fs(fileName);
+
       LLVMContext &Context = M.getContext();
-      StructType *MaskType = StructType::create(Context, "Mask");
+      StructType *MaskType = StructType::create(Context, typeName);
       MaskType->setBody(Type::getInt32Ty(Context));
       Type *Mask = MaskType;
 
       for (Function &F : M)
       {
-        errs() << "Function: " << F.getName() << "\n";
+        std::string str;
+        raw_string_ostream rso(str);
+
+        rso << "Function: " << F.getName() << "\n";
+
+        rso << "Arguments:\n";
+
+        for (auto &Arg : F.args())
+        {
+          Arg.mutateType(Mask);
+
+          rso << Arg << "\n";
+        }
+
+        rso << "Instructions:\n";
+
         for (auto &BB : F)
         {
           for (auto &I : BB)
           {
-            // alloca를 기반으로 다른 instruction의 type을 추측할 수 있지 않을까?
+            
             if (auto *Alloca = dyn_cast<AllocaInst>(&I))
             {
               Alloca->setAllocatedType(MaskType);
@@ -43,12 +69,18 @@ namespace
             {
               Sext->mutateType(Mask);
             }
-            errs() << I << "\n";
+            rso << I << "\n";
           }
         }
-      }
+        rso.flush();
+        fs << str << "\n";
+      } 
+      fs.close();
       return PreservedAnalyses::all();
     }
+    private:
+      std::string typeName;
+      std::string fileName;
   };
 }
 
@@ -60,11 +92,19 @@ llvm::PassPluginLibraryInfo getPluginInfo()
       {
         PB.registerPipelineParsingCallback(
             [](
-                StringRef Name, ModulePassManager &MPM, ArrayRef<PassBuilder::PipelineElement>)
+                StringRef Name, ModulePassManager &MPM, ArrayRef<PassBuilder::PipelineElement> Args)
             {
               if (Name == "getInfo")
               {
-                MPM.addPass(GetInfo());
+                std::string typeName = "Mask";
+                std::string fileName = "File.txt";
+
+                if(Args.size() > 0){
+                  typeName = Args[0].Name.str();
+                  fileName = Args[1].Name.str();
+                }
+                
+                MPM.addPass(GetInfo(typeName, fileName));
                 return true;
               }
               return false;
